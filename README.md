@@ -51,13 +51,47 @@ dsh plugin --profile web add /path/to/dsh-tidewatch
 
 > 动态插件只存在于当前进程内存，DSH 重启即消失；需要长期可用请用方案 A。
 
-## API Key 存储与安全
+## API Key 从哪来（无需手动填写）
 
-- Key 通过 DSH 的 `credentials` 服务保存（ref: `DSH_PLUGIN_DEEPSEEK_KEY`），落盘于本机 `~/.dsh/.credentials.yaml`。
-- **Key 永不回传浏览器**：前端只拿到「是否已配置 / 来源」与余额数值。
+监视器**默认直接复用 harness 已经配置好的模型凭据**，解析顺序：
+
+1. **当前生效模型所属 provider 的凭据引用** —— 由
+   `agentDefaultModel.currentSelection()` 得到 provider id，再用
+   `llm.listConfigurableProviders()` 给出的 `settingsNs` + `settingsPath`
+   定位该 provider 的配置对象，读其 `apiKeyEnv`（credential-ref 字段），
+   最后经 `credentials` 服务解析出 Key。
+2. 用户在面板里**手动保存**的 Key（credentials ref `DSH_PLUGIN_DEEPSEEK_KEY`）。
+3. 兜底环境变量 `DEEPSEEK_API_KEY`。
+
+面板顶部会显示当前模型与 provider（如 `模型 deepseek-v4.1-flash · deepseek-official`），
+并提供数据源下拉框：列出所有**能解析出凭据的** provider（llm-pi-ai 声明的几十个
+休眠路由不会出现在列表里），选中即切换数据源。
+
+### 安全
+
+- **Key 永不回传浏览器**：前端只拿到凭据引用名、来源与可用性，以及余额数值。
 - 余额请求由 Host 执行 `curl`，Key 经**环境变量**传递，不出现在命令行、不写入日志。
-- 若本机已配置环境变量 `DEEPSEEK_API_KEY`，插件自动复用（显示「环境变量」），无需手动输入。
-- 点「清除」可随时删除已保存的 Key（环境变量来源不受影响）。
+- 余额接口只有 DeepSeek 系提供（`<baseURL>/user/balance`）；其余 provider 会被标记为
+  不支持并给出明确提示，而不是发一次注定失败的请求。
+- 点「清除」只删除手动保存的 Key，不影响 provider 配置与环境变量来源。
+
+## 生效方式（常驻插件）
+
+| 改动 | 生效方式 |
+| --- | --- |
+| `lib/client.js`（浏览器半边） | **刷新页面**即可 |
+| `lib/index.js` / `lib/tide.js`（宿主半边） | 需**重启 DSH profile** |
+| `cordis.patch.yml` | 实时（`patchReload: live`，配置级热重载） |
+
+宿主半边不会随 patch 热重载更新：本 profile 未启用模块级 HMR
+（`dsh-base` 的 `hmr` 行默认 `disabled`，文档注明 "Module reload is opt-in per profile"），
+所以 `patchReload: live` 只重放配置、不替换已加载的模块。
+
+## 测试
+
+```sh
+node tests/tide.test.mjs   # provider 发现、凭据解析优先级、余额端点推导、降级路径
+```
 
 ## 时段规则出处
 
