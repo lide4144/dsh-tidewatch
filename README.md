@@ -83,14 +83,38 @@ dsh plugin --profile web add /path/to/dsh-tidewatch
 | `lib/index.js` / `lib/tide.js`（宿主半边） | 需**重启 DSH profile** |
 | `cordis.patch.yml` | 实时（`patchReload: live`，配置级热重载） |
 
-宿主半边不会随 patch 热重载更新：本 profile 未启用模块级 HMR
-（`dsh-base` 的 `hmr` 行默认 `disabled`，文档注明 "Module reload is opt-in per profile"），
-所以 `patchReload: live` 只重放配置、不替换已加载的模块。
+宿主半边不会随文件改动或 patch 热重载更新：loader 经 ESM `import()` 装载模块，
+缓存按 URL 命中；`patchReload: live` 只重放配置、不替换已加载的模块，
+而 `dsh-base` 的 `hmr` 行默认 `disabled`（"Module reload is opt-in per profile"）。
+实测：改动 `lib/index.js` 后 `entry.fiber` 仍是原实例，新路由不会出现。
+
+## 传输层（为什么不用 `connection.rpc`）
+
+宿主通过 `connection.fetch.register` 注册一条位于共享 API 通道之下的精确路由：
+
+```
+POST /api/dsh-tidewatch
+body: { "endpoint": "status" | "providers" | "save-key" | "clear-key" | "fetch-balance",
+        "payload": { ... } }
+resp: { "ok": true, "value": { ... } }      // 业务失败也放在 value.error 内
+```
+
+该路径由 `/api` 载体统一施加 Host/Origin 校验与浏览器会话鉴权，浏览器侧同源
+`fetch` 自动携带 cookie。
+
+**未使用 `connection.rpc.handle` 的原因（本构建的宿主缺陷）**：
+`HostConnectionService` 以插件自身 ctx 构造，而该 ctx 的 `inject` 只有
+`['credentials']`，因此 `rpc.handle` 内部访问 `owner.webServer` 时必然抛
+`cannot get property "webServer" without inject`，路由永远注册不上
+（HTTP 表现为落到 `frontend-static` 兜底的 405）。
+`connection.fetch` 的注册路径不经过 `owner.webServer`，故不受影响。
+若宿主将来修复该注入，`lib/index.js` 的 rpc 回退分支会自动接管。
 
 ## 测试
 
 ```sh
-node tests/tide.test.mjs   # provider 发现、凭据解析优先级、余额端点推导、降级路径
+node tests/tide.test.mjs        # provider 发现、凭据解析优先级、余额端点推导、降级路径
+node tests/transport.test.mjs   # 路由注册、端点分发、Key 不外泄、rpc 回退与异常容纳
 ```
 
 ## 时段规则出处
