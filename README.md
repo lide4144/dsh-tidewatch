@@ -35,6 +35,10 @@ dsh plugin --profile web add /path/to/dsh-tidewatch
 `node_modules/` 下建一个指向本目录的软链接；patch 层默认 `patchReload: live`，
 保存后即时生效，**无需重启**。
 
+> ⚠️ 两种方式**二选一**：bundle 装载会自动应用包内的 `cordis.patch.yml`，
+> 若同时又手工追加了同一行，会出现重复插入。另外手工软链接会被该 profile 的
+> `pnpm install` 清理，长期使用建议走 bundle 装载。
+
 改完客户端半边（`lib/client.js`）后刷新页面即可，无构建步骤。
 
 ## B. 安装为动态插件（单会话）
